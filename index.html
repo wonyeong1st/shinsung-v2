@@ -66,7 +66,7 @@
       </svg>
     </div>
     <div class="text-sm font-semibold text-sky-300 tracking-wide">입출고 · 거래처 · 배송 · 매출 통합</div>
-    <div class="text-2xl font-extrabold mt-1 tracking-tight">(주) 신성에프앤디</div>
+    <div id="introSplashCompanyName" class="text-2xl font-extrabold mt-1 tracking-tight">(주) 신성에프앤디</div>
   </div>
 
   <!-- =========================================================
@@ -141,23 +141,14 @@
 
   <script>
   /*********************************************************************
-   * (주) 신성에프앤디 통합 관리 앱 v2
-   *
-   * [아키텍처 구성]
-   * 1. Storage Keys & Defaults (기존 데이터 100% 호환 + 배송/매출/원장 키)
-   * 2. Utils (안전한 저장소, 날짜/달력, 금액, 초성검색, 진동/사운드, 토스트/모달)
-   * 3. Global State & Data Normalization
-   * 4. Navigation & Android Back Button Router
-   * 5. Tab 1: 입출고 관리 (홈 / 출고 / 명성·음봉 조회 / 입고·반납 / 입고·반납 조회)
-   * 6. Tab 2: 거래처 관리 (대시보드 / 등록·수정(마감일·격주·월간주기) / 납품내역서)
-   * 7. Tab 3: 스마트 배송 스케줄러 (정기코스 / 미루기 / 달력예약 / 대기목록 직접 순서변경)
-   * 8. Tab 4: 매출 · 미수금 · 거래처별 원장 (선입선출 금액수금 / 계산서 마감집계 / 카톡복사)
-   * 9. Tab 5: 통합 설정 (단가 예약 변경 / 기간 정산 / 기존 백업 복구 / 통합 백업)
+   * 생수 대리점 통합 관리 앱 v2
    *********************************************************************/
 
   /* ===================================================================
    * 1. Storage Keys & Defaults
    * =================================================================== */
+  const DEFAULT_COMPANY_NAME = '(주) 신성에프앤디';
+
   const KEYS = {
     // [거래처 앱 기존 키 유지]
     clients: 'bizAppDB',
@@ -178,11 +169,12 @@
     lastInboundId: 'lastInboundId',
 
     // [통합 앱 설정 & 배송/매출 키]
+    companyName: 'shinsungCompanyName',
     soundEnabled: 'shinsungSoundEnabled',
-    deliverySchedules: 'deliverySchedules',   // 수동 예약(manual), 이월(postpone), 건너뛰기(skip)
-    deliveryRecords: 'deliveryRecords',       // 완료된 배송 전표 & 매출/미수금 기록
-    deliverySellPrices: 'deliverySellPrices', // 기타 품목 납품 판매 단가 자동 기억
-    deliveryDateOrders: 'deliveryDateOrders'  // 날짜별 배송 대기 목록 커스텀 순서
+    deliverySchedules: 'deliverySchedules',
+    deliveryRecords: 'deliveryRecords',
+    deliverySellPrices: 'deliverySellPrices',
+    deliveryDateOrders: 'deliveryDateOrders'
   };
 
   const DEFAULT_ITEMS = [
@@ -223,7 +215,7 @@
   ];
 
   /* ===================================================================
-   * 2. Utils (저장소 / 날짜 / 숫자 / 한글 초성 / 피드백 / 커스텀 모달)
+   * 2. Utils
    * =================================================================== */
   function loadJSON(key, fallback) {
     try {
@@ -247,7 +239,6 @@
     return Number.isFinite(n) ? n : 0;
   }
 
-  // 거래처 단가/임대/통재고 숫자 파싱
   function parseClientNum(val) {
     if (val === undefined || val === null) return 0;
     const str = String(val).trim();
@@ -256,7 +247,6 @@
     return isNaN(parsed) ? 0 : parsed;
   }
 
-  // 패트(PET) 전용 거래처 판별
   function isPetOnlyClient(client) {
     if (!client) return false;
     return /패트|페트|PET/i.test(String(client.rental || ''));
@@ -322,7 +312,6 @@
     return escapeHtml(str);
   }
 
-  // 전표별 수금 완료 금액 및 미수 잔액 헬퍼 (부분 수금 완벽 호환)
   function getRecordPaidAmount(r) {
     if (!r) return 0;
     const total = num(r.totalAmount);
@@ -336,7 +325,6 @@
     return Math.max(0, num(r.totalAmount) - getRecordPaidAmount(r));
   }
 
-  // 한글 초성 추출
   const CHOSUNG = ['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
   function getChosung(str) {
     if (!str) return '';
@@ -352,7 +340,6 @@
     return result;
   }
 
-  // 진동 & 부드러운 클릭음 피드백
   let __audioCtx = null;
   function tap(ms = 20) {
     try {
@@ -380,7 +367,6 @@
     tap(15);
   }, { passive: true });
 
-  // 모바일 숫자 입력칸: 터치 시 전체 선택 & 엔터 시 키보드 닫기
   function bindAutoSelectInput(inp) {
     if (!inp || inp.__autoSelectBound) return;
     inp.__autoSelectBound = true;
@@ -402,7 +388,6 @@
     });
   }
 
-  // 롱프레스(길게 누르기) 헬퍼
   function bindLongPress(el, onLongPress, duration = 550) {
     let timer = null;
     let startX = 0;
@@ -446,7 +431,6 @@
     return () => triggered;
   }
 
-  // 토스트 알림
   function showToast(msg, duration = 2400) {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
@@ -459,7 +443,6 @@
     }, duration);
   }
 
-  // 공용 모달 열기/닫기
   function openCustomModal(htmlContent, { closeOnBackdrop = true } = {}) {
     const root = document.getElementById('modalRoot');
     root.innerHTML = htmlContent;
@@ -478,7 +461,6 @@
     root.onclick = null;
   }
 
-  // 커스텀 확인창 (confirm 대체)
   function showConfirmModal({ title, message, confirmText = '확인', cancelText = '취소', danger = false, onConfirm }) {
     openCustomModal(`
       <div class="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl border border-slate-200 space-y-4">
@@ -504,12 +486,10 @@
    * =================================================================== */
   const nowInit = new Date();
   const state = {
-    // 네비게이션 상태
-    activeTab: 'io',       // 'io' | 'clients' | 'delivery' | 'sales' | 'settings'
-    ioSubScreen: 'home',   // 'home' | 'shipping' | 'hist_m' | 'hist_e' | 'inbound' | 'inbound_hist'
+    activeTab: 'io',
+    ioSubScreen: 'home',
     homeContainerWh: '명성',
 
-    // 거래처 화면 상태
     clientViewMode: localStorage.getItem(KEYS.clientViewMode) || 'card',
     clientFilterMode: 'all',
     clientSearch: '',
@@ -517,36 +497,32 @@
     clientFormOpen: false,
     editingClientId: null,
 
-    // 배송 탭 상태
     deliveryDate: todayISO(),
     deliveryCalendarOpen: false,
     deliveryCalendarMonth: { year: nowInit.getFullYear(), month: nowInit.getMonth() },
-    deliveryFilter: 'all', // 'all' | 'pending' | 'done'
-    deliveryCompactMode: true, // 기본값: 간략히 보기 (빈 곳 터치 시 상세 펼침)
-    deliveryReorderMode: false, // 배송 대기 목록 직접 코스 순서 변경 모드
+    deliveryFilter: 'all',
+    deliveryCompactMode: true,
+    deliveryReorderMode: false,
 
-    // 매출 탭 상태
-    salesSubTab: 'summary', // 'summary' | 'ledger' | 'unpaid'
-    salesQuickPeriod: 'thisMonth', // 'today' | 'thisMonth' | 'lastMonth' | 'custom'
+    salesSubTab: 'summary',
+    salesQuickPeriod: 'thisMonth',
     salesStart: toLocalISO(new Date(nowInit.getFullYear(), nowInit.getMonth(), 1)),
     salesEnd: todayISO(),
     ledgerYear: nowInit.getFullYear(),
     ledgerMonth: nowInit.getMonth(),
-    ledgerClosingFilter: 'all', // 'all' | 'eom' | '25' | 'other' | 'unpaid'
+    ledgerClosingFilter: 'all',
     ledgerSearch: '',
-    unpaidBadgeMode: 'clients', // 'clients' (미수 거래처 수) | 'records' (미수 전표 건수)
-    unpaidCompactMode: true,    // true: 간략히(기본) | false: 전체 자세히
+    unpaidBadgeMode: 'clients',
+    unpaidCompactMode: true,
     unpaidSearch: '',
-    unpaidSort: 'amountDesc',   // 'amountDesc' | 'name' | 'countDesc'
+    unpaidSort: 'amountDesc',
 
-    // 입출고 전표 수정 상태
     editingOutgoRecord: null,
     editingInboundRecord: null,
 
-    // 앱 설정
+    companyName: (localStorage.getItem(KEYS.companyName) || '').trim() || DEFAULT_COMPANY_NAME,
     soundEnabled: loadJSON(KEYS.soundEnabled, true),
 
-    // 실제 데이터
     clients: loadJSON(KEYS.clients, []),
     items: loadJSON(KEYS.items, DEFAULT_ITEMS),
     outgoRecords: loadJSON(KEYS.outgo, []),
@@ -559,12 +535,23 @@
     personalRate: num(localStorage.getItem(KEYS.personalRate) || 1800),
     truckSize: num(localStorage.getItem(KEYS.truckSize) || 864),
 
-    // 배송/매출 데이터
     deliverySchedules: loadJSON(KEYS.deliverySchedules, []),
     deliveryRecords: loadJSON(KEYS.deliveryRecords, []),
     deliverySellPrices: loadJSON(KEYS.deliverySellPrices, {}),
     deliveryDateOrders: loadJSON(KEYS.deliveryDateOrders, {})
   };
+
+  function getCompanyName() {
+    return (state.companyName || '').trim() || DEFAULT_COMPANY_NAME;
+  }
+
+  function applyCompanyBranding() {
+    const name = getCompanyName();
+    document.title = `${name} 통합 관리 v2`;
+    const splashEl = document.getElementById('introSplashCompanyName');
+    if (splashEl) splashEl.innerText = name;
+  }
+  applyCompanyBranding();
 
   function normalizeAllData() {
     if (!state.containerHeld || typeof state.containerHeld !== 'object') {
@@ -615,7 +602,6 @@
 
   function getEffectiveItemPrice(it, wh, dateStr) {
     if (!it) return 0;
-    if (wh === '명성' && it.name === '18.9L') return 0;
     const d = dateStr || todayISO();
     const sched = state.priceSchedule && state.priceSchedule.items;
     if (sched && sched.applyFrom && d < sched.applyFrom && sched.prevItems && sched.prevItems[it.name]) {
@@ -816,10 +802,11 @@
   function renderIoHome() {
     const todayTasks = getDeliveryTasksForDate(todayISO());
     const todayPendingCount = todayTasks.pending.length;
+    const companyName = getCompanyName();
 
     setHeader({
-      title: '(주) 신성에프앤디',
-      titleHtml: `${SPARKLE_LOGO_INLINE_SVG}<span>(주) 신성에프앤디</span>`,
+      title: companyName,
+      titleHtml: `${SPARKLE_LOGO_INLINE_SVG}<span class="truncate">${escapeHtml(companyName)}</span>`,
       badge: '통합 v2',
       showBack: false,
       rightHtml: `
@@ -835,6 +822,8 @@
     const hasPriceSched =
       (state.priceSchedule?.personalRate?.applyFrom > todayStr) ||
       (state.priceSchedule?.items?.applyFrom > todayStr);
+    const item189Today = state.items.find(x => x.name === '18.9L');
+    const m189PriceToday = getEffectiveItemPrice(item189Today, '명성', todayStr);
 
     main.innerHTML = `
       <div class="space-y-3.5">
@@ -908,7 +897,7 @@
               </div>
             `).join('')}
           </div>
-          <div class="text-[11px] text-slate-400 mt-2.5">※ 명성에서 18.9L 출고 시 개인 재고가 자동 차감됩니다.</div>
+          <div class="text-[11px] text-slate-400 mt-2.5">${m189PriceToday > 0 ? `※ 명성 18.9L 단가(${money(m189PriceToday)})가 설정되어 출고 시 명성 정산에 자동 누적됩니다.` : '※ 명성 18.9L 단가가 0원이므로 출고 시 개인 재고가 자동 차감됩니다.'}</div>
         </div>
       </div>
     `;
@@ -951,7 +940,7 @@
         <div class="border border-slate-200 rounded-2xl p-3 bg-slate-50/70 space-y-3">
           <div class="flex items-center justify-between gap-2">
             <div class="font-extrabold text-sm text-slate-800">출고 수량 입력</div>
-            <div class="text-[11px] font-semibold text-slate-500">명성 18.9L 단가 0원(개인재고 차감)</div>
+            <div id="ship189Hint" class="text-[11px] font-semibold text-slate-500">명성 18.9L 단가 0원(개인재고 차감)</div>
           </div>
           <div id="shipItems" class="space-y-2.5">
             <div id="shipMainItems" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5"></div>
@@ -1118,6 +1107,14 @@
         if (!it) return;
         el.innerText = `명성 ${num(getEffectiveItemPrice(it, '명성', d)).toLocaleString()} / 음봉 ${num(getEffectiveItemPrice(it, '음봉', d)).toLocaleString()}`;
       });
+      const hintEl = document.getElementById('ship189Hint');
+      if (hintEl) {
+        const item189 = state.items.find(x => x.name === '18.9L');
+        const m189 = getEffectiveItemPrice(item189, '명성', d);
+        hintEl.innerText = m189 > 0
+          ? `명성 18.9L 단가 ${money(m189)}(명성 정산 누적)`
+          : '명성 18.9L 단가 0원(개인재고 차감)';
+      }
     }
 
     function calcShipTotal() {
@@ -1236,6 +1233,7 @@
     };
 
     applyWarehouseStyles();
+    refreshShipPriceLabels();
     updateOtherToggleUI();
     calcShipTotal();
   }
@@ -1244,11 +1242,12 @@
     if (lines && lines.length) {
       if (wh === '명성') {
         for (const ln of lines) {
-          if (ln.name === '18.9L') {
+          const it = state.items.find(x => x.name === ln.name) || {};
+          const price = getEffectiveItemPrice(it, '명성', date);
+          if (ln.name === '18.9L' && price === 0) {
             state.myStock['18.9L'] = num(state.myStock['18.9L']) - num(ln.qty);
           } else {
-            const it = state.items.find(x => x.name === ln.name) || {};
-            state.settlement.myeong += num(ln.qty) * getEffectiveItemPrice(it, '명성', date);
+            state.settlement.myeong += num(ln.qty) * price;
           }
         }
       } else {
@@ -1269,11 +1268,12 @@
     if (r.items && r.items.length) {
       if (r.warehouse === '명성') {
         for (const ln of r.items) {
-          if (ln.name === '18.9L') {
+          const it = state.items.find(x => x.name === ln.name) || {};
+          const price = getEffectiveItemPrice(it, '명성', r.date);
+          if (ln.name === '18.9L' && price === 0) {
             state.myStock['18.9L'] = num(state.myStock['18.9L']) + num(ln.qty);
           } else {
-            const it = state.items.find(x => x.name === ln.name) || {};
-            state.settlement.myeong -= num(ln.qty) * getEffectiveItemPrice(it, '명성', r.date);
+            state.settlement.myeong -= num(ln.qty) * price;
           }
         }
       } else {
@@ -1904,7 +1904,7 @@
     ihQuick.onchange = () => {
       const now = new Date();
       if (ihQuick.value === 'this') {
-        ihStart.value = toLocalISO(new Date(now.getFullYear(), now.getMonth(), 1));
+        ihStart.value = toLocalISO(new Date(now.getFullYear(), today.getMonth(), 1));
         ihEnd.value = toLocalISO(now);
       } else {
         ihStart.value = toLocalISO(new Date(now.getFullYear(), now.getMonth() - 1, 1));
@@ -1917,7 +1917,7 @@
   }
 
   /* ===================================================================
-   * 6. TAB 2: 거래처 관리 (마감일 · 격주 기준일 · 납품내역서 연동)
+   * 6. TAB 2: 거래처 관리
    * =================================================================== */
   function renderClientsTab() {
     setHeader({
@@ -2036,7 +2036,6 @@
                   ${VISIT_CYCLES.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
                 </select>
               </div>
-              <!-- 매주/격주 요일 선택 -->
               <div id="cVisitDaysWrap" class="hidden space-y-2">
                 <div>
                   <label class="text-[11px] font-bold text-slate-500 block mb-1">정기 방문 요일 (복수 선택 가능)</label>
@@ -2046,13 +2045,11 @@
                     `).join('')}
                   </div>
                 </div>
-                <!-- 격주 기준일 지정 -->
                 <div id="cBiweeklyAnchorWrap" class="hidden">
                   <label class="text-[11px] font-bold text-slate-500 block mb-1">격주 기준일 (이번 주 방문하는 날짜 선택)</label>
                   <input type="date" id="cVisitAnchorDate" value="${todayISO()}" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold" />
                 </div>
               </div>
-              <!-- 매월 일자 / 주차·요일 선택 -->
               <div id="cVisitMonthDayWrap" class="hidden space-y-2">
                 <div class="grid grid-cols-2 gap-1 bg-white p-1 rounded-lg border border-slate-200">
                   <button type="button" id="cMonthTypeDateBtn" onclick="setMonthlyTypeUI('date')" class="py-1.5 rounded-md text-[11px] font-extrabold bg-indigo-600 text-white transition">📅 날짜로 지정 (매월 X일)</button>
@@ -2060,13 +2057,11 @@
                 </div>
                 <input type="hidden" id="cVisitMonthlyType" value="date" />
 
-                <!-- 매월 날짜 입력 -->
                 <div id="cMonthlyDateSub">
                   <label class="text-[11px] font-bold text-slate-500 block mb-1">매월 방문일 (1~31일)</label>
                   <input type="number" id="cVisitMonthDay" min="1" max="31" placeholder="예: 15" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold" />
                 </div>
 
-                <!-- 매월 N번째 요일 입력 -->
                 <div id="cMonthlyWeekdaySub" class="hidden space-y-2">
                   <div>
                     <label class="text-[11px] font-bold text-slate-500 block mb-1">방문 주차 선택</label>
@@ -2286,7 +2281,6 @@
     return `${item.closingDay}일마감`;
   }
 
-  // 마감일 기준 정산 시작일~종료일 계산 (year, month는 0-indexed 마감 기준월)
   function getBillingCycleRange(closingDay, year, month) {
     if (!closingDay || closingDay === 'none' || closingDay === 'eom') {
       const start = toLocalISO(new Date(year, month, 1));
@@ -2716,10 +2710,8 @@
   }
 
   /* ===================================================================
-   * 7. TAB 3: 스마트 배송 스케줄러 (대기 목록 직접 코스 순서 변경 포함)
+   * 7. TAB 3: 스마트 배송 스케줄러
    * =================================================================== */
-
-  // 특정 거래처가 해당 날짜(dateStr)에 정기 방문 대상인지 판별
   function isClientRegularOnDate(client, dateStr) {
     if (!client || !client.visitCycle || client.visitCycle === 'irregular') return false;
     const target = parseISO(dateStr);
@@ -2760,7 +2752,6 @@
     return false;
   }
 
-  // 특정 날짜의 배송 대기 목록 및 완료 목록 계산
   function getDeliveryTasksForDate(dateStr) {
     const doneRecords = state.deliveryRecords.filter(r => r.date === dateStr);
     const doneClientIds = new Set(doneRecords.filter(r => r.clientId).map(r => r.clientId));
@@ -2768,7 +2759,6 @@
 
     const pendingMap = new Map();
 
-    // 1) 정기 코스 거래처
     for (const c of state.clients) {
       if (!isClientRegularOnDate(c, dateStr)) continue;
       const movedOrSkipped = state.deliverySchedules.some(
@@ -2789,7 +2779,6 @@
       });
     }
 
-    // 2) 다른 날에서 이월(postpone)되어 온 일정
     for (const s of state.deliverySchedules) {
       if (s.type !== 'postpone' || s.targetDate !== dateStr) continue;
       if (doneScheduleIds.has(String(s.id))) continue;
@@ -2839,7 +2828,6 @@
       });
     }
 
-    // 3) 수동 사전 예약(manual) 일정
     for (const s of state.deliverySchedules) {
       if (s.type !== 'manual' || s.date !== dateStr) continue;
       if (doneScheduleIds.has(String(s.id))) continue;
@@ -2895,7 +2883,6 @@
       }
     }
 
-    // 해당 날짜에 저장된 커스텀 순서(deliveryDateOrders)가 있으면 우선 반영, 없으면 기본 courseOrder 순
     const customDateOrder = Array.isArray(state.deliveryDateOrders?.[dateStr])
       ? state.deliveryDateOrders[dateStr]
       : null;
@@ -2918,7 +2905,6 @@
     return { pending, done };
   }
 
-  // 예약된 품목·수량 요약 텍스트 생성
   function formatPlannedItemsSummary(planned) {
     if (!planned) return '';
     const parts = [];
@@ -2937,7 +2923,6 @@
     const { pending, done } = getDeliveryTasksForDate(dateStr);
     const totalDoneAmt = done.reduce((acc, r) => acc + num(r.totalAmount), 0);
 
-    // 우측 상단에는 코스순서 버튼을 제거하고 [＋ 일정 추가] 버튼을 크게 배치
     setHeader({
       title: '🚚 스마트 배송',
       badge: isToday ? '오늘' : dateStr.slice(5),
@@ -2952,7 +2937,6 @@
     const main = document.getElementById('appMain');
     main.innerHTML = `
       <div class="space-y-3">
-        <!-- 1. 날짜 네비게이션 + 달력 토글 -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3 space-y-2.5">
           <div class="flex items-center justify-between gap-2">
             <button type="button" onclick="shiftDeliveryDate(-1)" class="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-base active:scale-90 transition">◀</button>
@@ -2974,13 +2958,11 @@
             </button>
           </div>
 
-          <!-- 월별 달력 (펼침 시 표시) -->
           <div id="deliveryCalendarWrap" class="${state.deliveryCalendarOpen ? 'block' : 'hidden'} pt-2 border-t border-slate-100">
             ${state.deliveryCalendarOpen ? buildDeliveryCalendarHtml() : ''}
           </div>
         </div>
 
-        <!-- 2. 당일 배송 요약 & 필터 & 대기목록 직접 순서 변경 버튼 -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3 space-y-2.5">
           <div class="grid grid-cols-3 gap-2 text-center">
             <div class="bg-amber-50/70 border border-amber-200 rounded-xl py-2 px-1">
@@ -3026,7 +3008,6 @@
           ` : ''}
         </div>
 
-        <!-- 3. 배송 대기 목록 -->
         ${(state.deliveryFilter === 'all' || state.deliveryFilter === 'pending') ? `
           <div id="deliveryPendingListWrap" class="space-y-2.5">
             ${pending.length > 0 ? pending.map((t, idx) => renderPendingDeliveryCard(t, idx, pending.length)).join('') : `
@@ -3041,7 +3022,6 @@
           </div>
         ` : ''}
 
-        <!-- 4. 배송 완료 목록 -->
         ${(state.deliveryFilter === 'all' || state.deliveryFilter === 'done') && done.length > 0 ? `
           <div class="space-y-2 pt-1">
             <div class="text-xs font-extrabold text-emerald-700 px-1">✅ 배송 완료 내역 (${done.length}건)</div>
@@ -3073,10 +3053,8 @@
     const searchQuery = escapeJsAttr(c.addr || c.name || '');
     const safeClientName = escapeJsAttr(c.name || '');
     const plannedText = formatPlannedItemsSummary(task.plannedItems);
-    const showPlannedBox = (task.source === 'manual' || task.source === 'postpone' || task.plannedItems);
     const isCompact = state.deliveryCompactMode;
 
-    // 코스 순서 편집 모드 전용 카드 UI (▲ / ▼ 버튼 + ☰ 터치 드래그 손잡이)
     if (state.deliveryReorderMode) {
       return `
         <div data-reorder-idx="${idx}" data-task-key="${escapeHtml(task.taskKey)}" class="delivery-reorder-card select-none bg-white rounded-2xl border-2 border-indigo-200 border-l-4 ${borderAccent} shadow-sm p-3 flex items-center justify-between gap-2 transition">
@@ -3101,7 +3079,6 @@
 
     return `
       <div onclick="toggleDeliveryCardDetails(event, this)" class="select-none cursor-pointer bg-white rounded-2xl border border-slate-200/90 border-l-4 ${borderAccent} shadow-sm p-3.5 space-y-2.5 transition">
-        <!-- 첫째 줄: 숫자 배지 + 거래처명 + 오른쪽 끝 지도 버튼 -->
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2 min-w-0">
             <span class="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-extrabold inline-flex items-center justify-center shrink-0">${idx + 1}</span>
@@ -3112,7 +3089,6 @@
           </div>
         </div>
 
-        <!-- 둘째 줄: 배송 완료(확대) & 일정 변경 & 취소 버튼 -->
         <div class="grid grid-cols-12 gap-1.5">
           <button type="button" onclick="event.stopPropagation(); openCompleteDeliveryModal(${c.id || 'null'}, '${state.deliveryDate}', null, '${task.scheduleId || ''}')" class="col-span-7 py-2.5 rounded-xl bg-emerald-600 text-white font-extrabold text-sm shadow-sm active:scale-95 transition">
             ✅ 배송 완료
@@ -3125,7 +3101,6 @@
           </button>
         </div>
 
-        <!-- 접이식 상세 영역 (빈 곳 터치 시 펼침) -->
         <div class="d-item-details ${isCompact ? 'hidden' : 'block'} pt-2.5 border-t border-slate-100 space-y-2">
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <span class="px-2 py-0.5 rounded-full border text-[10px] font-extrabold ${badgeColor}">${escapeHtml(task.badge)}</span>
@@ -3150,24 +3125,29 @@
             </div>
           `}
 
-          ${showPlannedBox ? `
-            <div class="text-xs rounded-xl px-2.5 py-1.5 font-bold border ${
-              plannedText
-                ? 'bg-indigo-50 text-indigo-900 border-indigo-200'
-                : 'bg-slate-50 text-slate-600 border-slate-200'
-            }">
-              ${plannedText ? `📦 주문 품목: ${escapeHtml(plannedText)}` : '📋 수량 미정 (방문 후 현장 확인)'}
-            </div>
-          ` : ''}
+          <button type="button" onclick="event.stopPropagation(); confirmEditPendingDelivery(${c.id || 'null'}, '${task.source}', '${task.scheduleId || ''}', '${state.deliveryDate}')" class="w-full text-left text-xs rounded-xl px-2.5 py-2 font-bold border flex items-center justify-between gap-2 active:scale-[0.99] transition ${
+            plannedText
+              ? 'bg-indigo-50 text-indigo-900 border-indigo-200 hover:bg-indigo-100/70'
+              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+          }">
+            <span class="min-w-0 break-words">${plannedText ? `📦 주문 품목: ${escapeHtml(plannedText)}` : '📋 수량 미정 (방문 후 현장 확인)'}</span>
+            <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-white/80 border border-slate-300/70 text-slate-600 shrink-0">수정</span>
+          </button>
 
-          ${task.note ? `<div class="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-xl px-2.5 py-1.5 font-semibold">📝 예약 메모: ${escapeHtml(task.note)}</div>` : ''}
+          <button type="button" onclick="event.stopPropagation(); confirmEditPendingDelivery(${c.id || 'null'}, '${task.source}', '${task.scheduleId || ''}', '${state.deliveryDate}')" class="w-full text-left text-xs rounded-xl px-2.5 py-2 font-semibold border flex items-center justify-between gap-2 active:scale-[0.99] transition ${
+            task.note
+              ? 'text-purple-800 bg-purple-50 border-purple-200 hover:bg-purple-100/70'
+              : 'text-purple-700 bg-purple-50/40 border-dashed border-purple-200 hover:bg-purple-50'
+          }">
+            <span class="min-w-0 break-words">${task.note ? `📝 예약 메모: ${escapeHtml(task.note)}` : '📝 예약 메모 추가 (예: 냉온수기 교체 등)'}</span>
+            <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-white/80 border border-purple-200 text-purple-700 shrink-0">${task.note ? '수정' : '입력'}</span>
+          </button>
           ${c.memo ? `<div class="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5">💬 ${escapeHtml(c.memo)}</div>` : ''}
         </div>
       </div>
     `;
   }
 
-  // 배송 대기 목록에서 직접 코스 순서 변경 토글 & 이동 로직
   function toggleDeliveryReorderMode() {
     state.deliveryReorderMode = !state.deliveryReorderMode;
     renderDeliveryTab();
@@ -3175,10 +3155,8 @@
 
   function applyNewPendingTaskOrder(orderedTasks) {
     const dateStr = state.deliveryDate;
-    // 1) 당일 배송 대기 목록 커스텀 순서 저장 (1회성 기타 배송지 포함)
     state.deliveryDateOrders[dateStr] = orderedTasks.map(t => t.taskKey);
 
-    // 2) 등록된 거래처의 기본 정기 코스 순서(courseOrder)도 함께 업데이트하여 다음 방문에도 유지
     const registeredInOrder = orderedTasks.filter(t => !t.isOneTime && t.clientId);
     if (registeredInOrder.length > 1) {
       const existingRanks = registeredInOrder
@@ -3301,7 +3279,6 @@
     `;
   }
 
-  // 월별 달력 HTML 생성
   function buildDeliveryCalendarHtml() {
     const { year, month } = state.deliveryCalendarMonth;
     const firstDay = new Date(year, month, 1).getDay();
@@ -3413,7 +3390,6 @@
     if (det) det.classList.toggle('hidden');
   }
 
-  /* 7-0. 배달 전 대기 일정 취소(삭제) */
   function confirmCancelPendingDelivery(clientId, source, scheduleId, currentDateStr, targetName) {
     const isRegular = source === 'regular';
     showConfirmModal({
@@ -3427,6 +3403,9 @@
         if ((source === 'manual' || source === 'postpone') && scheduleId) {
           state.deliverySchedules = state.deliverySchedules.filter(x => String(x.id) !== String(scheduleId));
         } else if (clientId) {
+          if (scheduleId) {
+            state.deliverySchedules = state.deliverySchedules.filter(x => String(x.id) !== String(scheduleId));
+          }
           state.deliverySchedules.push({
             id: uid(),
             type: 'skip',
@@ -3441,7 +3420,6 @@
     });
   }
 
-  /* 7-1. 내일로 미루기 / 일정 이월 모달 */
   function openPostponeModal(clientId, source, scheduleId, currentDateStr) {
     const schedObj = scheduleId ? state.deliverySchedules.find(x => String(x.id) === String(scheduleId)) : null;
     const isOneTime = !!(schedObj && schedObj.isOneTime);
@@ -3498,14 +3476,24 @@
         const s = state.deliverySchedules.find(x => String(x.id) === String(scheduleId));
         if (s) s.targetDate = targetDate;
       } else {
+        let carriedItems = null;
+        let carriedNote = '';
+        if (scheduleId) {
+          const prevOverride = state.deliverySchedules.find(x => String(x.id) === String(scheduleId));
+          if (prevOverride) {
+            carriedItems = prevOverride.plannedItems || null;
+            carriedNote = prevOverride.note || '';
+            state.deliverySchedules = state.deliverySchedules.filter(x => String(x.id) !== String(scheduleId));
+          }
+        }
         state.deliverySchedules.push({
           id: uid(),
           type: 'postpone',
           clientId,
           origDate: currentDateStr,
           targetDate,
-          plannedItems: null,
-          note: ''
+          plannedItems: carriedItems,
+          note: carriedNote
         });
       }
       persistDeliveryData();
@@ -3523,6 +3511,9 @@
       if ((source === 'manual' || source === 'postpone') && scheduleId) {
         state.deliverySchedules = state.deliverySchedules.filter(x => String(x.id) !== String(scheduleId));
       } else {
+        if (scheduleId) {
+          state.deliverySchedules = state.deliverySchedules.filter(x => String(x.id) !== String(scheduleId));
+        }
         state.deliverySchedules.push({
           id: uid(),
           type: 'skip',
@@ -3537,9 +3528,183 @@
     };
   }
 
-  /* 7-2. 수동 일정 추가 / 사전 예약 모달 (2단계: 대상 선택 -> 품목·수량 지정 화면 + 기타 직접 입력) */
+  function confirmEditPendingDelivery(clientId, source, scheduleId, dateStr) {
+    const { pending } = getDeliveryTasksForDate(dateStr);
+    const task = pending.find(t =>
+      (scheduleId && String(t.scheduleId || '') === String(scheduleId)) ||
+      (clientId && !t.isOneTime && t.clientId === clientId)
+    );
+    if (!task) return;
+
+    showConfirmModal({
+      title: '배송 품목 · 메모 수정',
+      message: `'${task.client.name}'의 주문 품목·수량 및 예약 메모를 수정할까요?`,
+      confirmText: '수정하기',
+      cancelText: '취소',
+      onConfirm: () => openEditPendingDeliveryModal(clientId, source, scheduleId, dateStr)
+    });
+  }
+
+  function openEditPendingDeliveryModal(clientId, source, scheduleId, dateStr) {
+    const { pending } = getDeliveryTasksForDate(dateStr);
+    const task = pending.find(t =>
+      (scheduleId && String(t.scheduleId || '') === String(scheduleId)) ||
+      (clientId && !t.isOneTime && t.clientId === clientId)
+    );
+    if (!task) return;
+
+    const client = (!task.isOneTime && clientId) ? state.clients.find(c => c.id === clientId) : null;
+    const displayTitle = task.client.name || '배송지';
+    const isPet = client ? isPetOnlyClient(client) : false;
+
+    const existingPlanned = task.plannedItems || null;
+    const qty189Val = existingPlanned ? num(existingPlanned.qty189) : 0;
+    const otherCatalog = state.items.filter(it => it.name !== '18.9L');
+    const extraQtyMap = {};
+    otherCatalog.forEach(it => { extraQtyMap[it.name] = 0; });
+    if (existingPlanned && Array.isArray(existingPlanned.extraItems)) {
+      existingPlanned.extraItems.forEach(ex => {
+        if (ex && ex.name) extraQtyMap[ex.name] = num(ex.qty);
+      });
+    }
+    const memoVal = task.note || '';
+
+    openCustomModal(`
+      <div class="bg-white rounded-2xl p-4 w-full max-w-md shadow-2xl border border-slate-200 space-y-3 max-h-[92vh] overflow-y-auto">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-base font-extrabold text-indigo-800">📦 배송 품목 · 수량 지정 (2/2단계)</div>
+            <div class="text-xs font-bold text-slate-600 mt-0.5">
+              ${escapeHtml(displayTitle)}
+              ${task.isOneTime ? `<span class="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-extrabold ml-1">1회성</span>` : ''}
+              · ${formatKoreanDate(dateStr)}
+            </div>
+          </div>
+          <button type="button" onclick="closeCustomModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-extrabold">✕</button>
+        </div>
+
+        <button type="button" id="epSaveUnspecifiedBtn" class="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 text-xs font-extrabold flex items-center justify-between active:scale-[0.99] transition">
+          <span>📋 수량 미정으로 저장 (방문 후 현장 확인)</span>
+          <span class="text-indigo-600">바로저장 →</span>
+        </button>
+
+        <div class="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-3 flex items-center justify-between gap-2">
+          <div>
+            <div class="text-xs font-extrabold text-indigo-950">🚰 18.9L 생수 (통)</div>
+            <div class="text-[11px] text-indigo-700">
+              ${client && !isPet && client.qty ? `거래처 기본: ${escapeHtml(String(client.qty))}` : '필요 시 수량 입력 (0 = 미지정)'}
+            </div>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button type="button" id="ep189Minus" class="w-9 h-9 rounded-lg bg-white border border-slate-300 font-extrabold text-slate-700">−</button>
+            <input id="ep189Qty" type="number" inputmode="numeric" value="${qty189Val}" class="w-16 border border-slate-300 py-1.5 px-2 rounded-lg text-right font-extrabold text-sm bg-white" />
+            <button type="button" id="ep189Plus" class="w-9 h-9 rounded-lg bg-white border border-slate-300 font-extrabold text-slate-700">+</button>
+          </div>
+        </div>
+
+        <div class="border border-slate-200 rounded-2xl p-3 bg-slate-50/70 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-extrabold text-slate-800">🧴 기타 품목 (패트 · 종이컵 등)</span>
+            ${isPet && client?.qty ? `<span class="text-[11px] font-bold text-teal-700">거래처 기본: ${escapeHtml(String(client.qty))}</span>` : ''}
+          </div>
+          <div class="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+            ${otherCatalog.map((it, idx) => `
+              <div class="bg-white border border-slate-200 rounded-xl px-2.5 py-2 flex items-center justify-between gap-2">
+                <span class="text-xs font-extrabold text-slate-800 truncate">${escapeHtml(it.name)}</span>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button type="button" data-ep-ex-step="-1" data-ep-ex-idx="${idx}" class="ep-ex-btn w-8 h-8 rounded-lg bg-slate-100 font-extrabold text-slate-700">−</button>
+                  <input data-ep-ex-qty="${idx}" data-ep-ex-name="${escapeHtml(it.name)}" type="number" inputmode="numeric" value="${extraQtyMap[it.name] || 0}" class="w-14 border border-slate-300 py-1 px-1.5 rounded-lg text-right font-extrabold text-xs bg-white" />
+                  <button type="button" data-ep-ex-step="1" data-ep-ex-idx="${idx}" class="ep-ex-btn w-8 h-8 rounded-lg bg-slate-100 font-extrabold text-slate-700">+</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <label class="text-xs font-bold text-slate-600 block">예약 메모 (선택)</label>
+          <input type="text" id="epNote" value="${escapeHtml(memoVal)}" placeholder="예: 오전 도착 요청, 냉온수기 1대 교체" class="w-full border border-slate-300 px-3 py-2 rounded-xl text-xs bg-slate-50 outline-none focus:bg-white focus:border-indigo-500" />
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 pt-1">
+          <button type="button" onclick="closeCustomModal()" class="py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm">취소</button>
+          <button type="button" id="epSaveFinalBtn" class="col-span-2 py-3 rounded-xl bg-indigo-600 text-white font-extrabold text-sm shadow active:scale-95">✅ 수정 내용 저장</button>
+        </div>
+      </div>
+    `);
+
+    const inp189 = document.getElementById('ep189Qty');
+    bindAutoSelectInput(inp189);
+    document.getElementById('ep189Minus').onclick = () => { inp189.value = Math.max(0, num(inp189.value) - 1); };
+    document.getElementById('ep189Plus').onclick = () => { inp189.value = num(inp189.value) + 1; };
+
+    document.querySelectorAll('.ep-ex-btn').forEach(btn => {
+      btn.onclick = () => {
+        const idx = btn.dataset.epExIdx;
+        const stepVal = Number(btn.dataset.epExStep);
+        const inp = document.querySelector(`input[data-ep-ex-qty="${idx}"]`);
+        if (inp) inp.value = Math.max(0, num(inp.value) + stepVal);
+      };
+    });
+    document.querySelectorAll('input[data-ep-ex-qty]').forEach(bindAutoSelectInput);
+
+    function commitPendingEdit(clearQuantities = false) {
+      const nextNote = (document.getElementById('epNote')?.value || '').trim();
+      let plannedItems = null;
+      if (!clearQuantities) {
+        const q189 = Math.max(0, num(inp189.value));
+        const extras = [];
+        document.querySelectorAll('input[data-ep-ex-qty]').forEach(inp => {
+          const q = Math.max(0, num(inp.value));
+          if (q > 0) extras.push({ name: inp.dataset.epExName, qty: q });
+        });
+        if (q189 > 0 || extras.length > 0) {
+          plannedItems = { qty189: q189, extraItems: extras };
+        }
+      }
+
+      const targetSched = scheduleId
+        ? state.deliverySchedules.find(s => String(s.id) === String(scheduleId))
+        : null;
+
+      if (targetSched) {
+        if (source === 'regular' && !plannedItems && !nextNote) {
+          state.deliverySchedules = state.deliverySchedules.filter(s => String(s.id) !== String(targetSched.id));
+        } else {
+          targetSched.plannedItems = plannedItems;
+          targetSched.note = nextNote;
+        }
+      } else if (clientId) {
+        if (plannedItems || nextNote) {
+          state.deliverySchedules.push({
+            id: uid(),
+            type: 'manual',
+            isOneTime: false,
+            clientId,
+            date: dateStr,
+            plannedItems,
+            note: nextNote
+          });
+        }
+      }
+
+      persistDeliveryData();
+      closeCustomModal();
+      const summaryBadge = formatPlannedItemsSummary(plannedItems);
+      showToast(
+        summaryBadge
+          ? `✅ ${displayTitle} (${summaryBadge}) 수정 완료!`
+          : (nextNote ? `✅ ${displayTitle} 예약 메모가 저장되었습니다.` : `✅ ${displayTitle} 수량 미정으로 저장되었습니다.`)
+      );
+      renderDeliveryTab();
+    }
+
+    document.getElementById('epSaveUnspecifiedBtn').onclick = () => commitPendingEdit(true);
+    document.getElementById('epSaveFinalBtn').onclick = () => commitPendingEdit(false);
+  }
+
   function openManualScheduleModal(preselectedClientId = null, defaultDate = todayISO()) {
-    let targetMode = 'client'; // 'client' | 'custom'
+    let targetMode = 'client';
     let selectedId = preselectedClientId || null;
     let targetDate = defaultDate || todayISO();
     let customInfo = { name: '', phone: '', addr: '', paymentType: '현금' };
@@ -3565,7 +3730,6 @@
               <button type="button" onclick="closeCustomModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-extrabold">✕</button>
             </div>
 
-            <!-- 날짜 선택 -->
             <div class="space-y-1.5">
               <label class="text-xs font-bold text-slate-600 block">배송 날짜</label>
               <div class="grid grid-cols-3 gap-1.5 mb-1.5">
@@ -3576,7 +3740,6 @@
               <input type="date" id="msDate" value="${targetDate}" class="w-full border border-slate-300 px-3 py-2 rounded-xl text-sm font-extrabold bg-slate-50" />
             </div>
 
-            <!-- 등록 거래처 vs 기타(직접 입력) 전환 버튼 -->
             <div class="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
               <button type="button" id="msModeClient" class="py-2 rounded-lg text-xs font-extrabold transition ${
                 targetMode === 'client' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600'
@@ -3713,7 +3876,6 @@
           renderModalStep();
         };
       } else {
-        // STEP 2: 배송 품목 및 수량 지정 화면
         const client = targetMode === 'client' ? state.clients.find(c => c.id === selectedId) : null;
         const displayTitle = client ? client.name : customInfo.name;
         const isPet = client ? isPetOnlyClient(client) : false;
@@ -3880,7 +4042,7 @@
     renderModalStep();
   }
 
-  /* 7-3. 배송 완료 모달 (빈통 회수 자동 연동 + 수정 단가 거래처 정보 자동 반영) */
+  /* 7-3. 배송 완료 모달 */
   function openCompleteDeliveryModal(clientId, dateStr, editingRecord = null, scheduleId = '') {
     const schedObj = scheduleId ? state.deliverySchedules.find(s => String(s.id) === String(scheduleId)) : null;
     const isOneTime = editingRecord ? !!editingRecord.isOneTime : !!(schedObj && schedObj.isOneTime);
@@ -3934,7 +4096,6 @@
           <button type="button" onclick="closeCustomModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-extrabold">✕</button>
         </div>
 
-        <!-- 18.9L 기본 납품 영역 -->
         <div class="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-3 space-y-2.5">
           <div class="flex items-center justify-between">
             <span class="text-xs font-extrabold text-indigo-900">🚰 18.9L 생수 납품 (기본)</span>
@@ -3968,7 +4129,6 @@
           </div>
         </div>
 
-        <!-- 기타 품목 접기/펼치기 영역 -->
         <div class="border border-slate-200 rounded-2xl bg-slate-50/80 overflow-hidden">
           <button type="button" id="cdToggleExtraBtn" class="w-full px-3 py-2.5 flex items-center justify-between text-xs font-extrabold text-slate-700">
             <span id="cdToggleExtraLabel">${hasInitialExtra ? '▲ 기타 품목 접기' : '▼ 기타 품목 추가 (500ml·2.0L·종이컵 등)'}</span>
@@ -4004,7 +4164,6 @@
           </div>
         </div>
 
-        <!-- 결제 방식 및 수금 여부 -->
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="text-[11px] font-bold text-slate-500 block mb-1">결제 방식</label>
@@ -4020,7 +4179,6 @@
 
         <input type="text" id="cdMemo" value="${escapeHtml(editingRecord?.memo || schedObj?.note || '')}" placeholder="배송 메모 (선택)" class="w-full border border-slate-200 px-3 py-2 rounded-xl text-xs bg-slate-50 outline-none" />
 
-        <!-- 총 납품 금액 -->
         <div class="flex items-center justify-between bg-slate-900 text-white rounded-2xl px-4 py-3">
           <span class="text-xs font-bold text-slate-300">총 납품 매출</span>
           <span id="cdTotalAmt" class="text-xl font-extrabold text-emerald-400">0원</span>
@@ -4097,7 +4255,6 @@
       return total;
     }
 
-    // 18.9L 납품 수량 변경 시 빈통 회수 수량도 자동 연동 (수동 조절도 자유롭게 가능)
     function handleQty189Change(newVal) {
       const safeNew = Math.max(0, num(newVal));
       qty189El.value = safeNew;
@@ -4194,7 +4351,6 @@
         }
       });
 
-      // 수정된 18.9L 단가를 거래처 탭의 거래처 정보에도 자동 반영
       if (client && p189 > 0 && parseClientNum(client.price) !== p189) {
         client.price = p189.toLocaleString();
         clientUpdated = true;
@@ -4260,7 +4416,6 @@
     recalcDeliveryModal();
   }
 
-  // 완료된 배송 전표 관리 (수정 / 수금상태 전환 / 삭제)
   function openDeliveryRecordMenu(recordId) {
     const rec = state.deliveryRecords.find(r => r.id === recordId);
     if (!rec) return;
@@ -4343,7 +4498,6 @@
     const main = document.getElementById('appMain');
     main.innerHTML = `
       <div class="space-y-3.5">
-        <!-- 서브 탭 전환 (매출 요약 / 거래처별 원장 / 미수금) -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-1.5 grid grid-cols-3 gap-1">
           <button type="button" onclick="setSalesSubTab('summary')" class="py-2.5 px-1 rounded-xl text-xs font-extrabold transition whitespace-nowrap ${
             state.salesSubTab === 'summary' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600'
@@ -4448,7 +4602,6 @@
     const area = document.getElementById('salesContentArea');
     area.innerHTML = `
       <div class="space-y-3.5">
-        <!-- 기간 선택기 -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3 space-y-2.5">
           <div class="grid grid-cols-4 gap-1.5">
             ${[
@@ -4468,7 +4621,6 @@
           </div>
         </div>
 
-        <!-- 핵심 매출 요약 카드 -->
         <div class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl p-4 shadow-md space-y-3">
           <div class="flex items-center justify-between">
             <span class="text-xs font-bold text-indigo-200">선택 기간 총 매출 (${records.length}건)</span>
@@ -4491,7 +4643,6 @@
           </div>
         </div>
 
-        <!-- 결제 방식별 집계 -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2.5">
           <div class="font-extrabold text-sm text-slate-900">💳 결제 방식별 매출</div>
           <div class="space-y-2">
@@ -4513,7 +4664,6 @@
           </div>
         </div>
 
-        <!-- 품목별 납품 합계 -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2">
           <div class="font-extrabold text-sm text-slate-900">📦 품목별 납품 합계</div>
           ${Object.keys(byItem).length > 0 ? Object.keys(byItem).map(name => `
@@ -4524,7 +4674,6 @@
           `).join('') : `<div class="text-xs text-slate-400 py-3 text-center">선택한 기간에 납품 내역이 없습니다.</div>`}
         </div>
 
-        <!-- 일별 매출 리스트 -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2.5">
           <div class="font-extrabold text-sm text-slate-900">📅 일별 매출 내역</div>
           ${sortedDates.length > 0 ? sortedDates.map(d => `
@@ -4570,7 +4719,6 @@
     };
   }
 
-  // 거래처별 원장 · 세금계산서 마감 집계 뷰
   function renderClientLedgerTabView() {
     const y = state.ledgerYear;
     const m = state.ledgerMonth;
@@ -4664,7 +4812,6 @@
     const area = document.getElementById('salesContentArea');
     area.innerHTML = `
       <div class="space-y-3">
-        <!-- 마감 기준월 선택 & 필터 -->
         <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3 space-y-2.5">
           <div class="flex items-center justify-between gap-2">
             <button type="button" onclick="shiftLedgerMonth(-1)" class="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-sm active:scale-90">◀</button>
@@ -4692,7 +4839,6 @@
           <input type="text" id="ledgerSearchInp" value="${escapeHtml(state.ledgerSearch)}" oninput="onLedgerSearchInput(this.value)" placeholder="🔍 거래처명 또는 초성(ㅎㅂ) 검색" class="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:bg-white focus:border-indigo-500" />
         </div>
 
-        <!-- 선택 조건 세금계산서 마감 합계 요약 -->
         <div class="bg-slate-900 text-white rounded-2xl p-3.5 shadow-sm space-y-2">
           <div class="flex items-center justify-between text-xs">
             <span class="text-slate-300 font-bold">조회된 거래처 (${filtered.length}곳) 마감 합계</span>
@@ -4710,7 +4856,6 @@
           </div>
         </div>
 
-        <!-- 거래처별 원장 카드 리스트 -->
         <div class="space-y-2">
           ${filtered.length === 0 ? `
             <div class="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-400">
@@ -4779,7 +4924,6 @@
     }
   }
 
-  // 거래처별 납품·거래 내역서 모달
   function openClientStatementModal(clientId, fallbackName = '', initYear = null, initMonth = null) {
     const client = clientId ? state.clients.find(c => c.id === clientId) : null;
     const cName = client ? client.name : (fallbackName || '거래처');
@@ -5007,7 +5151,7 @@
         }).join('\n');
 
         const copyPayload =
-          `[(주)신성에프앤디 거래내역 안내]\n` +
+          `[${getCompanyName()} 거래내역 안내]\n` +
           `거래처: ${cName}\n` +
           `기간: ${periodLabel}\n` +
           `-------------------------\n` +
@@ -5035,7 +5179,6 @@
     renderStatementContent();
   }
 
-  // 거래처별 미수금 관리 뷰 (금액 입력 선입선출 수금 / 전액 일괄 수금 / 개별 전표 확인 수금)
   function renderUnpaidView() {
     const unpaid = state.deliveryRecords.filter(r => getRecordUnpaidAmount(r) > 0);
     const totalUnpaid = unpaid.reduce((acc, r) => acc + getRecordUnpaidAmount(r), 0);
@@ -5055,7 +5198,6 @@
     const area = document.getElementById('salesContentArea');
     area.innerHTML = `
       <div class="space-y-3">
-        <!-- 상단 미수금 총계 카드 -->
         <div class="bg-rose-600 text-white rounded-2xl p-4 shadow-md flex items-center justify-between">
           <div>
             <div class="text-xs font-bold text-rose-100">전체 미수금 합계 (${allGroups.length}개 거래처)</div>
@@ -5070,7 +5212,6 @@
         </div>
 
         ${allGroups.length > 0 ? `
-          <!-- 미수 거래처 검색 · 정렬 · 간략히/자세히 제어 바 -->
           <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3 space-y-2">
             <div class="relative">
               <input type="text" id="unpaidSearchInp" value="${escapeHtml(state.unpaidSearch)}" oninput="onUnpaidSearchInput(this.value)" placeholder="🔍 미수 거래처명 또는 초성(ㅇㄷ) 검색" class="w-full pl-3.5 pr-9 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:bg-white focus:border-indigo-500" />
@@ -5164,7 +5305,6 @@
 
       return `
         <div onclick="toggleUnpaidCardDetails(event, this)" class="select-none cursor-pointer bg-white rounded-2xl border border-rose-200 shadow-sm p-3.5 transition">
-          <!-- 상단 기본 노출 영역: 거래처명(원장) + 아랫줄 미수 N건, 총 잔액 + 오른쪽 끝 금액 수금, 전액 수금 -->
           <div class="flex items-center justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -5185,7 +5325,6 @@
             </div>
           </div>
 
-          <!-- 접이식 상세 전표 영역 (빈 공간 클릭 시 펼침) -->
           <div class="u-item-details ${isCompact ? 'hidden' : 'block'} space-y-1.5 mt-3 pt-2.5 border-t border-slate-100" onclick="event.stopPropagation()">
             ${g.records.sort((a, b) => (a.date < b.date ? 1 : -1)).map(r => {
               const rem = getRecordUnpaidAmount(r);
@@ -5256,7 +5395,6 @@
     renderUnpaidGroupListOnly();
   }
 
-  // 금액 입력 수금 모달 (가장 오래된 과거 전표부터 선입선출 차감 + 자투리 잔액 표시)
   function openPartialCollectModal(key, clientName) {
     const targets = state.deliveryRecords
       .filter(r => getRecordUnpaidAmount(r) > 0 && String(r.clientId || r.clientName) === String(key))
@@ -5287,7 +5425,6 @@
           ※ 입력한 입금액만큼 <b>가장 오래된 과거 전표부터 순서대로 완납</b> 처리되며, 자투리가 남으면 최근 전표에 남은 미수 잔액으로 표시됩니다.
         </div>
 
-        <!-- 빠른 금액 버튼 -->
         <div class="flex flex-wrap gap-1.5">
           <button type="button" id="pcFullBtn" class="px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-extrabold active:scale-95">전액 (${money(totalUnpaid)})</button>
           ${prevMonthsSum > 0 && prevMonthsSum < totalUnpaid ? `
@@ -5299,7 +5436,6 @@
           <button type="button" id="pcClearBtn" class="px-2 py-1.5 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold active:scale-95">초기화</button>
         </div>
 
-        <!-- 입금 금액 입력칸 -->
         <div class="bg-slate-50 border-2 border-indigo-300 rounded-2xl p-3 flex items-center justify-between gap-2">
           <span class="text-xs font-extrabold text-slate-700 shrink-0">입금 받은 금액</span>
           <div class="flex items-center gap-1 flex-1 justify-end">
@@ -5308,7 +5444,6 @@
           </div>
         </div>
 
-        <!-- 실시간 선입선출 차감 미리보기 -->
         <div class="space-y-1.5">
           <div class="flex items-center justify-between text-xs px-0.5">
             <span class="font-extrabold text-slate-700">📋 과거순 자동 차감 미리보기</span>
@@ -5421,7 +5556,6 @@
     setTimeout(() => amtInp.focus(), 60);
   }
 
-  // 개별 전표 수금 버튼 클릭 시 확인창으로 한 번 더 묻고 수금 처리
   function confirmCollectSingleUnpaid(recordId) {
     const rec = state.deliveryRecords.find(r => r.id === recordId);
     if (!rec) return;
@@ -5627,6 +5761,17 @@
             </div>
           </div>
         </div>
+
+        <!-- 섹션 E: 상호명(대리점명) 변경 (화면 최하단) -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-4 flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <div class="text-[11px] font-bold text-slate-400">현재 적용된 대리점 상호</div>
+            <div class="text-sm font-extrabold text-slate-900 truncate mt-0.5">${escapeHtml(getCompanyName())}</div>
+          </div>
+          <button type="button" onclick="openChangeCompanyNameModal()" class="px-3.5 py-2.5 rounded-xl bg-slate-800 text-white text-xs font-extrabold shrink-0 active:scale-95 transition">
+            🏢 상호 변경
+          </button>
+        </div>
       </div>
     `;
 
@@ -5762,7 +5907,6 @@
       });
     };
 
-    // 기간 지정 정산 / 입금 완료 모달
     function openSettlementModal(wh) {
       const isM = wh === '명성';
       const currentTotal = isM ? num(state.settlement.myeong) : num(state.settlement.eumbong);
@@ -5940,7 +6084,6 @@
     document.getElementById('resetMyeong').onclick = () => openSettlementModal('명성');
     document.getElementById('resetEumbong').onclick = () => openSettlementModal('음봉');
 
-    // 품목 테이블 렌더링
     const table = document.getElementById('itemsTable');
     function drawItems() {
       table.innerHTML = '';
@@ -5967,7 +6110,7 @@
             <div class="bg-white border border-rose-200 rounded-xl px-2.5 py-1.5">
               <div class="text-[10px] font-extrabold text-rose-700">명성 단가</div>
               <div class="flex items-center mt-0.5">
-                <input data-i="${idx}" data-f="m" type="number" inputmode="numeric" class="w-full min-w-0 text-right text-sm font-extrabold outline-none bg-transparent ${it.lock ? 'text-slate-400' : 'text-slate-900'}" value="${num(it.myeongseong)}" ${it.lock ? 'disabled' : ''} />
+                <input data-i="${idx}" data-f="m" type="number" inputmode="numeric" class="w-full min-w-0 text-right text-sm font-extrabold outline-none bg-transparent text-slate-900" value="${num(it.myeongseong)}" />
                 <span class="text-[11px] text-slate-400 ml-1 shrink-0">원</span>
               </div>
             </div>
@@ -6081,6 +6224,49 @@
     };
   }
 
+  function openChangeCompanyNameModal() {
+    openCustomModal(`
+      <div class="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl border border-slate-200 space-y-3.5">
+        <div class="flex items-center justify-between">
+          <div class="text-base font-extrabold text-slate-900">🏢 대리점 상호 변경</div>
+          <button type="button" onclick="closeCustomModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-extrabold">✕</button>
+        </div>
+        <div class="text-xs text-slate-500 leading-relaxed">
+          입력하신 상호명은 앱 첫 화면 상단, 시작 화면, 거래처 안내문 복사 문구에 자동 반영됩니다.
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-slate-600 block mb-1">상호명</label>
+          <input id="cnInput" type="text" value="${escapeHtml(getCompanyName())}" placeholder="예: (주) 신성에프앤디" class="w-full border border-slate-300 px-3.5 py-2.5 rounded-xl text-sm font-extrabold bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none" />
+        </div>
+        <div class="grid grid-cols-3 gap-2 pt-1">
+          <button type="button" onclick="closeCustomModal()" class="py-3 rounded-xl bg-slate-100 text-slate-600 font-bold text-sm">취소</button>
+          <button type="button" id="cnSaveBtn" class="col-span-2 py-3 rounded-xl bg-indigo-600 text-white font-extrabold text-sm shadow active:scale-95">상호 저장</button>
+        </div>
+      </div>
+    `);
+
+    const inp = document.getElementById('cnInput');
+    setTimeout(() => { inp.focus(); inp.select(); }, 50);
+
+    const saveName = () => {
+      const next = (inp.value || '').trim() || DEFAULT_COMPANY_NAME;
+      state.companyName = next;
+      localStorage.setItem(KEYS.companyName, next);
+      applyCompanyBranding();
+      closeCustomModal();
+      showToast(`🏢 상호명이 '${next}'(으)로 변경되었습니다.`);
+      renderSettingsTab();
+    };
+
+    document.getElementById('cnSaveBtn').onclick = saveName;
+    inp.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveName();
+      }
+    };
+  }
+
   function toggleSoundSetting() {
     state.soundEnabled = !state.soundEnabled;
     saveJSON(KEYS.soundEnabled, state.soundEnabled);
@@ -6105,6 +6291,7 @@
     const payload = {
       schemaVersion: 'shinsung-unified-v2',
       exportedAt: new Date().toISOString(),
+      companyName: getCompanyName(),
       clients: state.clients,
       io: {
         items: state.items,
@@ -6127,7 +6314,7 @@
     };
     downloadBlob(
       JSON.stringify(payload, null, 2),
-      `신성통합백업_${todayISO().replace(/-/g, '')}.json`,
+      `통합백업_${todayISO().replace(/-/g, '')}.json`,
       'application/json'
     );
     showToast('💾 전체 통합 백업 파일이 저장되었습니다.');
@@ -6177,6 +6364,11 @@
   }
 
   function applyUnifiedData(data) {
+    if (data.companyName) {
+      state.companyName = String(data.companyName).trim() || DEFAULT_COMPANY_NAME;
+      localStorage.setItem(KEYS.companyName, state.companyName);
+      applyCompanyBranding();
+    }
     if (Array.isArray(data.clients)) {
       state.clients = data.clients;
       persistClients();
@@ -6335,6 +6527,8 @@
       danger: true,
       onConfirm: () => {
         Object.values(KEYS).forEach(k => localStorage.removeItem(k));
+        state.companyName = DEFAULT_COMPANY_NAME;
+        applyCompanyBranding();
         state.clients = [];
         state.items = JSON.parse(JSON.stringify(DEFAULT_ITEMS));
         state.outgoRecords = [];
