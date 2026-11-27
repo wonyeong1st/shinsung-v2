@@ -325,6 +325,12 @@
     return Math.max(0, num(r.totalAmount) - getRecordPaidAmount(r));
   }
 
+  function getClientTotalUnpaid(clientId, clientName) {
+    return state.deliveryRecords
+      .filter(r => (clientId ? r.clientId === clientId : (!r.clientId && r.clientName === clientName)))
+      .reduce((acc, r) => acc + getRecordUnpaidAmount(r), 0);
+  }
+
   const CHOSUNG = ['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
   function getChosung(str) {
     if (!str) return '';
@@ -1190,7 +1196,11 @@
       shipItems.querySelectorAll('input[type="number"]').forEach(inp => {
         const idx = Number(inp.dataset.idx);
         const q = num(inp.value);
-        if (q !== 0) lines.push({ name: state.items[idx].name, qty: q });
+        if (q !== 0) {
+          const it = state.items[idx];
+          const unitPrice = getEffectiveItemPrice(it, wh, date);
+          lines.push({ name: it.name, qty: q, unitPrice });
+        }
       });
 
       const collected = {};
@@ -1238,12 +1248,19 @@
     calcShipTotal();
   }
 
+  function getLineUnitPrice(ln, wh, date) {
+    if (ln && ln.unitPrice !== undefined && ln.unitPrice !== null) {
+      return num(ln.unitPrice);
+    }
+    const it = state.items.find(x => x.name === ln.name) || {};
+    return getEffectiveItemPrice(it, wh, date);
+  }
+
   function applyOutgoRecord(wh, date, lines, collected) {
     if (lines && lines.length) {
       if (wh === '명성') {
         for (const ln of lines) {
-          const it = state.items.find(x => x.name === ln.name) || {};
-          const price = getEffectiveItemPrice(it, '명성', date);
+          const price = getLineUnitPrice(ln, '명성', date);
           if (ln.name === '18.9L' && price === 0) {
             state.myStock['18.9L'] = num(state.myStock['18.9L']) - num(ln.qty);
           } else {
@@ -1252,8 +1269,8 @@
         }
       } else {
         for (const ln of lines) {
-          const it = state.items.find(x => x.name === ln.name) || {};
-          state.settlement.eumbong += num(ln.qty) * getEffectiveItemPrice(it, '음봉', date);
+          const price = getLineUnitPrice(ln, '음봉', date);
+          state.settlement.eumbong += num(ln.qty) * price;
         }
       }
     }
@@ -1268,8 +1285,7 @@
     if (r.items && r.items.length) {
       if (r.warehouse === '명성') {
         for (const ln of r.items) {
-          const it = state.items.find(x => x.name === ln.name) || {};
-          const price = getEffectiveItemPrice(it, '명성', r.date);
+          const price = getLineUnitPrice(ln, '명성', r.date);
           if (ln.name === '18.9L' && price === 0) {
             state.myStock['18.9L'] = num(state.myStock['18.9L']) + num(ln.qty);
           } else {
@@ -1278,8 +1294,8 @@
         }
       } else {
         for (const ln of r.items) {
-          const it = state.items.find(x => x.name === ln.name) || {};
-          state.settlement.eumbong -= num(ln.qty) * getEffectiveItemPrice(it, '음봉', r.date);
+          const price = getLineUnitPrice(ln, '음봉', r.date);
+          state.settlement.eumbong -= num(ln.qty) * price;
         }
       }
     }
@@ -1461,13 +1477,39 @@
       } else {
         const summary = {};
         const summaryAmt = {};
+        let legacyDiffTotal = 0;
         for (const r of filtered) {
-          for (const it of (r.items || [])) {
+          const rItems = r.items || [];
+          const savedTotal = num(r.total);
+          let estTotal = 0;
+          const lineAmts = rItems.map(it => {
             const q = num(it.qty);
-            summary[it.name] = (summary[it.name] || 0) + q;
-            const info = state.items.find(x => x.name === it.name) || {};
-            const price = getEffectiveItemPrice(info, warehouse, r.date);
-            summaryAmt[it.name] = (summaryAmt[it.name] || 0) + (q * price);
+            const price = getLineUnitPrice(it, warehouse, r.date);
+            const amt = q * price;
+            estTotal += amt;
+            return { it, q, price, amt };
+          });
+
+          if (rItems.length === 1 && estTotal !== savedTotal) {
+            lineAmts[0].amt = savedTotal;
+            estTotal = savedTotal;
+          } else if (warehouse === '명성' && estTotal !== savedTotal) {
+            const non189 = lineAmts.filter(x => x.it.name !== '18.9L');
+            const line189 = lineAmts.find(x => x.it.name === '18.9L');
+            if (non189.length === 1 && (!line189 || line189.price === 0)) {
+              non189[0].amt = savedTotal;
+              if (line189) line189.amt = 0;
+              estTotal = savedTotal;
+            }
+          }
+
+          for (const x of lineAmts) {
+            summary[x.it.name] = (summary[x.it.name] || 0) + x.q;
+            summaryAmt[x.it.name] = (summaryAmt[x.it.name] || 0) + x.amt;
+          }
+
+          if (estTotal !== savedTotal) {
+            legacyDiffTotal += (savedTotal - estTotal);
           }
         }
         let total = 0;
@@ -1480,6 +1522,14 @@
             <div class="flex justify-between items-center py-2 border-b border-slate-200/70 text-sm">
               <div><span class="font-bold text-slate-800">${escapeHtml(name)}</span> <span class="text-slate-500 text-xs">(${qty.toLocaleString()}개)</span></div>
               <div class="font-extrabold text-slate-900">${money(sum)}</div>
+            </div>`;
+        }
+        if (legacyDiffTotal !== 0) {
+          total += legacyDiffTotal;
+          rows += `
+            <div class="flex justify-between items-center py-2 border-b border-slate-200/70 text-xs text-amber-800 bg-amber-50/70 px-2 rounded-lg mt-1">
+              <div><span class="font-bold">과거 단가 변경 차액 보정</span> <span class="text-amber-600">(구 전표 기준)</span></div>
+              <div class="font-extrabold">${legacyDiffTotal > 0 ? '+' : ''}${money(legacyDiffTotal)}</div>
             </div>`;
         }
         res.innerHTML = `
@@ -3053,6 +3103,7 @@
     const searchQuery = escapeJsAttr(c.addr || c.name || '');
     const safeClientName = escapeJsAttr(c.name || '');
     const plannedText = formatPlannedItemsSummary(task.plannedItems);
+    const clientUnpaidTotal = getClientTotalUnpaid(isOneTime ? null : c.id, c.name);
     const isCompact = state.deliveryCompactMode;
 
     if (state.deliveryReorderMode) {
@@ -3139,9 +3190,18 @@
               ? 'text-purple-800 bg-purple-50 border-purple-200 hover:bg-purple-100/70'
               : 'text-purple-700 bg-purple-50/40 border-dashed border-purple-200 hover:bg-purple-50'
           }">
-            <span class="min-w-0 break-words">${task.note ? `📝 예약 메모: ${escapeHtml(task.note)}` : '📝 예약 메모 추가 (예: 냉온수기 교체 등)'}</span>
+            <span class="min-w-0 break-words">${task.note ? `📝 ${escapeHtml(task.note)}` : '📝 메모'}</span>
             <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-white/80 border border-purple-200 text-purple-700 shrink-0">${task.note ? '수정' : '입력'}</span>
           </button>
+
+          <div class="w-full text-xs rounded-xl px-2.5 py-2 font-bold border flex items-center justify-between gap-2 ${
+            clientUnpaidTotal > 0
+              ? 'bg-rose-50 text-rose-700 border-rose-200'
+              : 'bg-slate-50 text-slate-500 border-slate-200'
+          }">
+            <span>💳 누적 미수</span>
+            <span class="font-extrabold ${clientUnpaidTotal > 0 ? 'text-rose-700' : 'text-slate-600'}">${money(clientUnpaidTotal)}</span>
+          </div>
           ${c.memo ? `<div class="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5">💬 ${escapeHtml(c.memo)}</div>` : ''}
         </div>
       </div>
@@ -3446,29 +3506,69 @@
         </div>
 
         <div class="grid grid-cols-3 gap-1.5">
-          <button type="button" id="ppTom" class="py-2.5 rounded-xl bg-amber-500 text-white text-xs font-extrabold shadow-sm active:scale-95">내일로</button>
-          <button type="button" id="ppDayAfter" class="py-2.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-extrabold active:scale-95">모레로</button>
-          <button type="button" id="ppNextWeek" class="py-2.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-extrabold active:scale-95">다음 주</button>
+          <button type="button" id="ppTom" class="py-2.5 rounded-xl bg-amber-500 text-white text-xs font-extrabold shadow-sm active:scale-95 transition">내일로</button>
+          <button type="button" id="ppDayAfter" class="py-2.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-extrabold active:scale-95 transition">모레로</button>
+          <button type="button" id="ppNextWeek" class="py-2.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-extrabold active:scale-95 transition">다음 주</button>
         </div>
 
         <div class="flex items-center gap-2">
-          <input type="date" id="ppDateInput" value="${tomorrow}" class="flex-1 border border-slate-300 px-3 py-2 rounded-xl text-xs font-extrabold bg-slate-50" />
-          <button type="button" id="ppConfirm" class="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-extrabold shrink-0 active:scale-95">날짜 지정</button>
+          <input type="date" id="ppDateInput" value="${tomorrow}" class="flex-1 border border-slate-300 px-3 py-2 rounded-xl text-xs font-extrabold bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none" />
+          <button type="button" id="ppOpenPicker" class="px-4 py-2.5 rounded-xl bg-slate-800 text-white text-xs font-extrabold shrink-0 active:scale-95 transition">📅 날짜 지정</button>
         </div>
 
-        <div class="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
-          <button type="button" id="ppSkip" class="py-2.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-extrabold active:scale-95">이번 일정 제외</button>
-          <button type="button" onclick="closeCustomModal()" class="py-2.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold">닫기</button>
+        <div class="pt-2 border-t border-slate-100 grid grid-cols-3 gap-2">
+          <button type="button" onclick="closeCustomModal()" class="py-3 rounded-xl bg-slate-100 text-slate-600 text-sm font-bold active:scale-95 transition">취소</button>
+          <button type="button" id="ppSaveBtn" class="col-span-2 py-3 rounded-xl bg-indigo-600 text-white text-sm font-extrabold shadow active:scale-95 transition">저장</button>
         </div>
       </div>
     `);
 
-    const applyPostpone = (targetDate) => {
-      if (!targetDate) return;
-      if (targetDate === currentDateStr) {
-        showToast('⚠️ 현재와 같은 날짜입니다.');
-        return;
+    const dateInp = document.getElementById('ppDateInput');
+    const btnTom = document.getElementById('ppTom');
+    const btnDayAfter = document.getElementById('ppDayAfter');
+    const btnNextWeek = document.getElementById('ppNextWeek');
+
+    const updateQuickBtnHighlight = (val) => {
+      const pairs = [
+        [btnTom, tomorrow],
+        [btnDayAfter, dayAfter],
+        [btnNextWeek, nextWeek]
+      ];
+      pairs.forEach(([btn, dVal]) => {
+        if (val === dVal) {
+          btn.className = 'py-2.5 rounded-xl bg-amber-500 text-white text-xs font-extrabold shadow-sm active:scale-95 transition';
+        } else {
+          btn.className = 'py-2.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-extrabold active:scale-95 transition';
+        }
+      });
+    };
+
+    const selectQuickDate = (dVal) => {
+      dateInp.value = dVal;
+      updateQuickBtnHighlight(dVal);
+    };
+
+    btnTom.onclick = () => selectQuickDate(tomorrow);
+    btnDayAfter.onclick = () => selectQuickDate(dayAfter);
+    btnNextWeek.onclick = () => selectQuickDate(nextWeek);
+    dateInp.addEventListener('input', () => updateQuickBtnHighlight(dateInp.value));
+    dateInp.addEventListener('change', () => updateQuickBtnHighlight(dateInp.value));
+
+    document.getElementById('ppOpenPicker').onclick = () => {
+      try {
+        if (typeof dateInp.showPicker === 'function') {
+          dateInp.showPicker();
+        } else {
+          dateInp.focus();
+          dateInp.click();
+        }
+      } catch (err) {
+        dateInp.focus();
+        dateInp.click();
       }
+    };
+
+    const commitPostpone = (targetDate) => {
       if (source === 'manual' && scheduleId) {
         const s = state.deliverySchedules.find(x => String(x.id) === String(scheduleId));
         if (s) s.date = targetDate;
@@ -3497,34 +3597,27 @@
         });
       }
       persistDeliveryData();
-      closeCustomModal();
-      showToast(`⏭️ ${targetName} 일정이 ${formatKoreanDate(targetDate)}로 이월되었습니다.`);
+      showToast(`⏭️ ${targetName} 일정이 ${formatKoreanDate(targetDate)}로 변경되었습니다.`);
       renderDeliveryTab();
     };
 
-    document.getElementById('ppTom').onclick = () => applyPostpone(tomorrow);
-    document.getElementById('ppDayAfter').onclick = () => applyPostpone(dayAfter);
-    document.getElementById('ppNextWeek').onclick = () => applyPostpone(nextWeek);
-    document.getElementById('ppConfirm').onclick = () => applyPostpone(document.getElementById('ppDateInput').value);
-
-    document.getElementById('ppSkip').onclick = () => {
-      if ((source === 'manual' || source === 'postpone') && scheduleId) {
-        state.deliverySchedules = state.deliverySchedules.filter(x => String(x.id) !== String(scheduleId));
-      } else {
-        if (scheduleId) {
-          state.deliverySchedules = state.deliverySchedules.filter(x => String(x.id) !== String(scheduleId));
-        }
-        state.deliverySchedules.push({
-          id: uid(),
-          type: 'skip',
-          clientId,
-          origDate: currentDateStr
-        });
+    document.getElementById('ppSaveBtn').onclick = () => {
+      const targetDate = dateInp.value;
+      if (!targetDate) {
+        showToast('⚠️ 변경할 날짜를 선택해 주세요.');
+        return;
       }
-      persistDeliveryData();
-      closeCustomModal();
-      showToast(`✅ ${targetName}의 이번 일정만 제외했습니다.`);
-      renderDeliveryTab();
+      if (targetDate === currentDateStr) {
+        showToast('⚠️ 현재와 같은 날짜입니다.');
+        return;
+      }
+      showConfirmModal({
+        title: '배송 일정 변경 확인',
+        message: `배송 일정을 ${formatKoreanDate(targetDate)}로 변경하시겠습니까?`,
+        confirmText: '변경 저장',
+        cancelText: '취소',
+        onConfirm: () => commitPostpone(targetDate)
+      });
     };
   }
 
@@ -4081,16 +4174,17 @@
       ? (editingRecord.extraItems || [])
       : (planned?.extraItems || []);
     const hasInitialExtra = prefilledExtras.length > 0 || isPet || (isOneTime && defaultQty189 === 0);
+    const clientUnpaidTotal = getClientTotalUnpaid(isOneTime ? null : clientId, cName);
 
     openCustomModal(`
       <div class="bg-white rounded-2xl p-4 w-full max-w-md shadow-2xl border border-slate-200 space-y-3.5 max-h-[92vh] overflow-y-auto">
         <div class="flex items-center justify-between">
           <div>
             <div class="text-base font-extrabold text-emerald-700">${editingRecord ? '✏️ 배송 내역 수정' : '✅ 배송 완료 기록'}</div>
-            <div class="text-xs font-bold text-slate-500">
-              ${escapeHtml(cName)}
-              ${isOneTime ? `<span class="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-extrabold ml-1">1회성</span>` : ''}
-              · ${dateStr}
+            <div class="text-xs font-bold text-slate-500 mt-0.5 flex items-center flex-wrap gap-1">
+              <span class="text-sm font-extrabold text-slate-900">${escapeHtml(cName)}</span>
+              ${isOneTime ? `<span class="px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-extrabold">1회성</span>` : ''}
+              <span>· ${dateStr}</span>
             </div>
           </div>
           <button type="button" onclick="closeCustomModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-extrabold">✕</button>
@@ -4178,6 +4272,15 @@
         </div>
 
         <input type="text" id="cdMemo" value="${escapeHtml(editingRecord?.memo || schedObj?.note || '')}" placeholder="배송 메모 (선택)" class="w-full border border-slate-200 px-3 py-2 rounded-xl text-xs bg-slate-50 outline-none" />
+
+        <div class="flex items-center justify-between rounded-xl px-3.5 py-2.5 border text-xs font-extrabold ${
+          clientUnpaidTotal > 0
+            ? 'bg-rose-50 border-rose-200 text-rose-700'
+            : 'bg-slate-50 border-slate-200 text-slate-500'
+        }">
+          <span>💳 누적 미수</span>
+          <span class="text-sm font-extrabold ${clientUnpaidTotal > 0 ? 'text-rose-700' : 'text-slate-600'}">${money(clientUnpaidTotal)}</span>
+        </div>
 
         <div class="flex items-center justify-between bg-slate-900 text-white rounded-2xl px-4 py-3">
           <span class="text-xs font-bold text-slate-300">총 납품 매출</span>
@@ -4723,6 +4826,54 @@
     const y = state.ledgerYear;
     const m = state.ledgerMonth;
     const filter = state.ledgerClosingFilter;
+
+    const area = document.getElementById('salesContentArea');
+    area.innerHTML = `
+      <div class="space-y-3">
+        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" onclick="shiftLedgerMonth(-1)" class="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-sm active:scale-90">◀</button>
+            <div class="text-center">
+              <div class="text-sm font-extrabold text-slate-900">${y}년 ${m + 1}월 마감 기준</div>
+              <div class="text-[11px] text-slate-400">거래처별 설정된 마감일(25일·말일 등)로 자동 집계됩니다</div>
+            </div>
+            <button type="button" onclick="shiftLedgerMonth(1)" class="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-sm active:scale-90">▶</button>
+          </div>
+
+          <div class="flex flex-wrap gap-1.5">
+            ${[
+              { k: 'all', l: '전체 거래처' },
+              { k: '25', l: '📅 25일마감' },
+              { k: 'eom', l: '📅 말일마감' },
+              { k: 'other', l: '기타마감' },
+              { k: 'unpaid', l: '⏳ 미수보유' }
+            ].map(f => `
+              <button type="button" onclick="setLedgerClosingFilter('${f.k}')" class="px-2.5 py-1.5 rounded-full text-xs font-extrabold transition ${
+                filter === f.k ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+              }">${f.l}</button>
+            `).join('')}
+          </div>
+
+          <div class="relative">
+            <input type="text" id="ledgerSearchInp" value="${escapeHtml(state.ledgerSearch)}" oninput="onLedgerSearchInput(this.value)" placeholder="🔍 거래처명 또는 초성(ㅎㅂ) 검색" class="w-full pl-3 pr-9 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:bg-white focus:border-indigo-500" />
+            <button type="button" id="ledgerClearSearchBtn" onclick="clearLedgerSearch()" class="${state.ledgerSearch ? 'flex' : 'hidden'} absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 items-center justify-center rounded-full text-slate-400 hover:text-slate-700 font-bold text-xs">✕</button>
+          </div>
+        </div>
+
+        <div id="ledgerResultArea" class="space-y-3"></div>
+      </div>
+    `;
+
+    renderClientLedgerResultsOnly();
+  }
+
+  function renderClientLedgerResultsOnly() {
+    const resultArea = document.getElementById('ledgerResultArea');
+    if (!resultArea) return;
+
+    const y = state.ledgerYear;
+    const m = state.ledgerMonth;
+    const filter = state.ledgerClosingFilter;
     const kw = (state.ledgerSearch || '').trim().toLowerCase();
 
     const ledgerEntries = [];
@@ -4809,92 +4960,62 @@
     const filteredSupplySum = Math.round(filteredCycleSum / 1.1);
     const filteredVatSum = filteredCycleSum - filteredSupplySum;
 
-    const area = document.getElementById('salesContentArea');
-    area.innerHTML = `
-      <div class="space-y-3">
-        <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3 space-y-2.5">
-          <div class="flex items-center justify-between gap-2">
-            <button type="button" onclick="shiftLedgerMonth(-1)" class="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-sm active:scale-90">◀</button>
-            <div class="text-center">
-              <div class="text-sm font-extrabold text-slate-900">${y}년 ${m + 1}월 마감 기준</div>
-              <div class="text-[11px] text-slate-400">거래처별 설정된 마감일(25일·말일 등)로 자동 집계됩니다</div>
-            </div>
-            <button type="button" onclick="shiftLedgerMonth(1)" class="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-sm active:scale-90">▶</button>
-          </div>
-
-          <div class="flex flex-wrap gap-1.5">
-            ${[
-              { k: 'all', l: '전체 거래처' },
-              { k: '25', l: '📅 25일마감' },
-              { k: 'eom', l: '📅 말일마감' },
-              { k: 'other', l: '기타마감' },
-              { k: 'unpaid', l: '⏳ 미수보유' }
-            ].map(f => `
-              <button type="button" onclick="setLedgerClosingFilter('${f.k}')" class="px-2.5 py-1.5 rounded-full text-xs font-extrabold transition ${
-                filter === f.k ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-              }">${f.l}</button>
-            `).join('')}
-          </div>
-
-          <input type="text" id="ledgerSearchInp" value="${escapeHtml(state.ledgerSearch)}" oninput="onLedgerSearchInput(this.value)" placeholder="🔍 거래처명 또는 초성(ㅎㅂ) 검색" class="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:bg-white focus:border-indigo-500" />
+    resultArea.innerHTML = `
+      <div class="bg-slate-900 text-white rounded-2xl p-3.5 shadow-sm space-y-2">
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-slate-300 font-bold">조회된 거래처 (${filtered.length}곳) 마감 합계</span>
+          <span class="text-base font-extrabold text-emerald-400">${money(filteredCycleSum)}</span>
         </div>
-
-        <div class="bg-slate-900 text-white rounded-2xl p-3.5 shadow-sm space-y-2">
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-slate-300 font-bold">조회된 거래처 (${filtered.length}곳) 마감 합계</span>
-            <span class="text-base font-extrabold text-emerald-400">${money(filteredCycleSum)}</span>
+        <div class="grid grid-cols-2 gap-2 pt-1.5 border-t border-white/10 text-[11px]">
+          <div class="flex justify-between text-slate-300">
+            <span>공급가액(부가세별도)</span>
+            <strong class="text-white">${money(filteredSupplySum)}</strong>
           </div>
-          <div class="grid grid-cols-2 gap-2 pt-1.5 border-t border-white/10 text-[11px]">
-            <div class="flex justify-between text-slate-300">
-              <span>공급가액(부가세별도)</span>
-              <strong class="text-white">${money(filteredSupplySum)}</strong>
-            </div>
-            <div class="flex justify-between text-slate-300">
-              <span>부가세(10%)</span>
-              <strong class="text-white">${money(filteredVatSum)}</strong>
-            </div>
+          <div class="flex justify-between text-slate-300">
+            <span>부가세(10%)</span>
+            <strong class="text-white">${money(filteredVatSum)}</strong>
           </div>
         </div>
+      </div>
 
-        <div class="space-y-2">
-          ${filtered.length === 0 ? `
-            <div class="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-400">
-              조건에 해당하는 거래처가 없습니다.
-            </div>
-          ` : filtered.map(item => {
-            const safeName = escapeJsAttr(item.clientName);
-            const openCall = item.isOneTime
-              ? `openClientStatementModal(null, '${safeName}', ${y}, ${m})`
-              : `openClientStatementModal(${item.clientId}, '${safeName}', ${y}, ${m})`;
-            return `
-              <div onclick="${openCall}" class="cursor-pointer bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2 active:scale-[0.99] transition">
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-1.5 flex-wrap">
-                      <span class="text-sm font-extrabold text-slate-900 truncate">${escapeHtml(item.clientName)}</span>
-                      <span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
-                        item.closingDay === '25'
-                          ? 'bg-purple-100 text-purple-800'
-                          : (item.closingDay === 'eom' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-600')
-                      }">${escapeHtml(item.closingBadge)}</span>
-                    </div>
-                    <div class="text-[11px] text-slate-500 mt-1">
-                      집계기간: <b>${item.range.start.slice(5)} ~ ${item.range.end.slice(5)}</b> · 납품 <b>${item.cycleCount}회</b> (18.9L ${item.cycleQty189}통)
-                    </div>
+      <div class="space-y-2">
+        ${filtered.length === 0 ? `
+          <div class="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-400">
+            조건에 해당하는 거래처가 없습니다.
+          </div>
+        ` : filtered.map(item => {
+          const safeName = escapeJsAttr(item.clientName);
+          const openCall = item.isOneTime
+            ? `openClientStatementModal(null, '${safeName}', ${y}, ${m})`
+            : `openClientStatementModal(${item.clientId}, '${safeName}', ${y}, ${m})`;
+          return `
+            <div onclick="${openCall}" class="cursor-pointer bg-white rounded-2xl border border-slate-200/90 shadow-sm p-3.5 space-y-2 active:scale-[0.99] transition">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-sm font-extrabold text-slate-900 truncate">${escapeHtml(item.clientName)}</span>
+                    <span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                      item.closingDay === '25'
+                        ? 'bg-purple-100 text-purple-800'
+                        : (item.closingDay === 'eom' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-600')
+                    }">${escapeHtml(item.closingBadge)}</span>
                   </div>
-                  <div class="text-right shrink-0">
-                    <div class="text-sm font-extrabold ${item.cycleSales > 0 ? 'text-indigo-700' : 'text-slate-400'}">${money(item.cycleSales)}</div>
-                    ${item.allUnpaid > 0 ? `<div class="text-[10px] font-extrabold text-rose-600 mt-0.5">누적미수 ${money(item.allUnpaid)}</div>` : ''}
+                  <div class="text-[11px] text-slate-500 mt-1">
+                    집계기간: <b>${item.range.start.slice(5)} ~ ${item.range.end.slice(5)}</b> · 납품 <b>${item.cycleCount}회</b> (18.9L ${item.cycleQty189}통)
                   </div>
                 </div>
-                <div class="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px]">
-                  <span class="text-slate-400">💳 ${escapeHtml(item.paymentType)}</span>
-                  <span class="font-extrabold text-indigo-600">📄 날짜별 상세내역 · 계산서 보기 →</span>
+                <div class="text-right shrink-0">
+                  <div class="text-sm font-extrabold ${item.cycleSales > 0 ? 'text-indigo-700' : 'text-slate-400'}">${money(item.cycleSales)}</div>
+                  ${item.allUnpaid > 0 ? `<div class="text-[10px] font-extrabold text-rose-600 mt-0.5">누적미수 ${money(item.allUnpaid)}</div>` : ''}
                 </div>
               </div>
-            `;
-          }).join('')}
-        </div>
+              <div class="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px]">
+                <span class="text-slate-400">💳 ${escapeHtml(item.paymentType)}</span>
+                <span class="font-extrabold text-indigo-600">📄 날짜별 상세내역 · 계산서 보기 →</span>
+              </div>
+            </div>
+          `;
+        }).join('')}
       </div>
     `;
   }
@@ -4916,12 +5037,19 @@
 
   function onLedgerSearchInput(val) {
     state.ledgerSearch = val;
-    renderClientLedgerTabView();
-    const inp = document.getElementById('ledgerSearchInp');
-    if (inp) {
-      inp.focus();
-      inp.setSelectionRange(val.length, val.length);
+    const clearBtn = document.getElementById('ledgerClearSearchBtn');
+    if (clearBtn) {
+      if (val) { clearBtn.classList.remove('hidden'); clearBtn.classList.add('flex'); }
+      else { clearBtn.classList.add('hidden'); clearBtn.classList.remove('flex'); }
     }
+    renderClientLedgerResultsOnly();
+  }
+
+  function clearLedgerSearch() {
+    state.ledgerSearch = '';
+    const inp = document.getElementById('ledgerSearchInp');
+    if (inp) { inp.value = ''; inp.focus(); }
+    onLedgerSearchInput('');
   }
 
   function openClientStatementModal(clientId, fallbackName = '', initYear = null, initMonth = null) {
